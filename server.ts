@@ -68,6 +68,15 @@ async function startServer() {
     },
   });
 
+  // --- Admin configuration ---
+  const ADMIN_EMAIL = process.env.ADMIN_EMAIL; // Set this in Railway env vars to lock down initial admin
+
+  // Helper to verify user is admin
+  const isAdmin = (email: string | undefined) => {
+    const user = users.find(u => u.email === email);
+    return user && user.role === "Admin";
+  };
+
   // --- Auth Endpoints ---
   app.post("/api/auth/signup", (req, res) => {
     const { name, email, password } = req.body;
@@ -75,8 +84,19 @@ async function startServer() {
     if (users.find(u => u.email === email)) {
       return res.status(400).json({ success: false, message: "Email already exists." });
     }
-    const role = users.length === 0 ? "Admin" : "Authority";
-    const status = users.length === 0 ? "approved" : "pending";
+    // If ADMIN_EMAIL is set and matches, make them admin. Otherwise first user is admin.
+    let role = "Authority";
+    let status = "pending";
+    
+    if (ADMIN_EMAIL && email === ADMIN_EMAIL) {
+      role = "Admin";
+      status = "approved";
+    } else if (users.length === 0 && !ADMIN_EMAIL) {
+      // Only if no ADMIN_EMAIL env var is set, allow first signup to be admin
+      role = "Admin";
+      status = "approved";
+    }
+    
     const id = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
     const user = { id, name, email, password, role, status };
     users.push(user);
@@ -103,12 +123,30 @@ async function startServer() {
   });
 
   app.post("/api/users/:id/approve", (req, res) => {
+    // Check if the requesting user is an admin
+    const adminEmail = req.body.adminEmail;
+    if (!isAdmin(adminEmail)) {
+      return res.status(403).json({ success: false, message: "Only admins can approve users." });
+    }
     const u = users.find(u => u.id === Number(req.params.id));
     if (u) { u.status = 'approved'; saveUsers(); }
     res.json({ success: true });
   });
 
   app.delete("/api/users/:id", (req, res) => {
+    // Check if the requesting user is an admin
+    const adminEmail = req.body.adminEmail;
+    if (!isAdmin(adminEmail)) {
+      return res.status(403).json({ success: false, message: "Only admins can delete users." });
+    }
+    // Prevent deleting the last admin
+    const userToDelete = users.find(u => u.id === Number(req.params.id));
+    if (userToDelete && userToDelete.role === "Admin") {
+      const adminCount = users.filter(u => u.role === "Admin").length;
+      if (adminCount === 1) {
+        return res.status(400).json({ success: false, message: "Cannot delete the last admin." });
+      }
+    }
     users = users.filter(u => u.id !== Number(req.params.id));
     saveUsers();
     res.json({ success: true });
