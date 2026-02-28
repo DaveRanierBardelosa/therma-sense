@@ -1,1 +1,1 @@
-web: node --loader tsx ./server.ts
+web: npm run build && npm start

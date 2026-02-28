@@ -8,6 +8,11 @@ import Database from "better-sqlite3";
 import nodemailer from "nodemailer";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, query, limitToLast, onValue, off } from "firebase/database";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -239,8 +244,15 @@ async function startServer() {
     res.json(currentData);
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  // Serve static files in production
+  if (process.env.NODE_ENV === "production") {
+    app.use(express.static("dist"));
+    // SPA fallback
+    app.get("*", (req, res) => {
+      res.sendFile(__dirname + "/dist/index.html");
+    });
+  } else {
+    // Vite middleware for development
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -249,7 +261,7 @@ async function startServer() {
   }
 
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 
   // Graceful shutdown: clean up Firebase listener
