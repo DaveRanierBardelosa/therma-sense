@@ -5,6 +5,7 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { MembersPage } from "./pages/MembersPage";
@@ -19,8 +20,22 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/dashboard/authorities" element={<MembersPage />} />
-          <Route path="/dashboard/admin" element={<AdminPage />} />
+          <Route
+            path="/dashboard/authorities"
+            element={
+              <ProtectedRoute requiredRole="Admin">
+                <MembersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/admin"
+            element={
+              <ProtectedRoute requiredRole="Admin">
+                <AdminPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/dashboard/settings" element={<SettingsPage />} />
         </Routes>
       </Router>

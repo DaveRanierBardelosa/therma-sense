@@ -69,7 +69,7 @@ async function startServer() {
   });
 
   // --- Admin configuration ---
-  const ADMIN_EMAIL = process.env.ADMIN_EMAIL; // Set this in Railway env vars to lock down initial admin
+  const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "bardelosaranierdave@gmail.com"; // Only this email can be admin
 
   // Helper to verify user is admin
   const isAdmin = (email: string | undefined) => {
