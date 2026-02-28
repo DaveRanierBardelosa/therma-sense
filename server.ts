@@ -4,8 +4,8 @@ import { createServer as createViteServer } from "vite";
 import { WebSocketServer } from "ws";
 import http from "http";
 import cors from "cors";
-import Database from "better-sqlite3";
 import nodemailer from "nodemailer";
+import fs from "fs"; // for simple JSON storage
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, query, limitToLast, onValue, off } from "firebase/database";
 import path from "path";
@@ -43,18 +43,20 @@ async function startServer() {
     console.warn("Firebase initialization failed:", err);
   }
 
-  // --- Database Setup ---
-  const db = new Database("thermasense.db");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      email TEXT UNIQUE,
-      password TEXT,
-      role TEXT DEFAULT 'Authority',
-      status TEXT DEFAULT 'pending'
-    )
-  `);
+  // --- Simple JSON database for users ---
+  const usersFile = path.join(__dirname, "users.json");
+  let users: any[] = [];
+  if (fs.existsSync(usersFile)) {
+    try {
+      users = JSON.parse(fs.readFileSync(usersFile, "utf8"));
+    } catch {
+      users = [];
+    }
+  }
+
+  function saveUsers() {
+    fs.writeFileSync(usersFile, JSON.stringify(users, null, 2));
+  }
 
   // --- Email Setup ---
   // To use this, user needs to set EMAIL_USER and EMAIL_PASS in .env
@@ -69,53 +71,46 @@ async function startServer() {
   // --- Auth Endpoints ---
   app.post("/api/auth/signup", (req, res) => {
     const { name, email, password } = req.body;
-    try {
-      // Check if first user
-      const { count } = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
-      const role = count === 0 ? "Admin" : "Authority";
-      const status = count === 0 ? "approved" : "pending";
-
-      const stmt = db.prepare("INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)");
-      stmt.run(name, email, password, role, status);
-      
-      res.json({ success: true, message: count === 0 ? "Admin created and approved." : "Signup successful. Waiting for Admin approval." });
-    } catch (err: any) {
-      if (err.message.includes("UNIQUE")) {
-        res.status(400).json({ success: false, message: "Email already exists." });
-      } else {
-        res.status(500).json({ success: false, message: "Server error." });
-      }
+    // Check if email already exists
+    if (users.find(u => u.email === email)) {
+      return res.status(400).json({ success: false, message: "Email already exists." });
     }
+    const role = users.length === 0 ? "Admin" : "Authority";
+    const status = users.length === 0 ? "approved" : "pending";
+    const id = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
+    const user = { id, name, email, password, role, status };
+    users.push(user);
+    saveUsers();
+    res.json({ success: true, message: role === "Admin" ? "Admin created and approved." : "Signup successful. Waiting for Admin approval." });
   });
 
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE email = ? AND password = ?").get(email, password) as any;
-    
+    const user = users.find(u => u.email === email && u.password === password);
     if (!user) {
       return res.status(401).json({ success: false, message: "Invalid credentials." });
     }
     if (user.status === "pending") {
       return res.status(403).json({ success: false, message: "Your account is pending Admin approval. Please wait." });
     }
-    
-    // In a real app, use JWT. For this demo, we just return the user object.
     res.json({ success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   });
 
   // --- Users Endpoints (Admin Only) ---
   app.get("/api/users", (req, res) => {
-    const users = db.prepare("SELECT id, name, email, role, status FROM users").all();
-    res.json(users);
+    const list = users.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role, status: u.status }));
+    res.json(list);
   });
 
   app.post("/api/users/:id/approve", (req, res) => {
-    db.prepare("UPDATE users SET status = 'approved' WHERE id = ?").run(req.params.id);
+    const u = users.find(u => u.id === Number(req.params.id));
+    if (u) { u.status = 'approved'; saveUsers(); }
     res.json({ success: true });
   });
 
   app.delete("/api/users/:id", (req, res) => {
-    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+    users = users.filter(u => u.id !== Number(req.params.id));
+    saveUsers();
     res.json({ success: true });
   });
 
