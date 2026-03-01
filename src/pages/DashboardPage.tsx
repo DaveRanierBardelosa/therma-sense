@@ -31,10 +31,14 @@ export function DashboardPage() {
           setCurrentTemp(initial.temp);
           setCurrentHumidity(initial.humidity);
           lastDataTime = Date.now();
-          setIsConnected(true);
-          // Clear any pending timeout
-          if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
+          // Use backend's isConnected flag
+          if (initial.isConnected !== undefined) {
+            setIsConnected(initial.isConnected);
+          } else {
+            setIsConnected(true);
+          }
           // Set timeout to mark disconnected after 10 seconds of no data
+          if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
           connectionTimeoutId = setTimeout(() => {
             setIsConnected(false);
           }, 10000);
@@ -110,7 +114,13 @@ export function DashboardPage() {
             if (data && data.temp && data.humidity) {
               lastDataTime = Date.now();
               lastWsMessage = Date.now();
-              setIsConnected(true);
+              
+              // Use backend's isConnected flag
+              if (data.isConnected !== undefined) {
+                setIsConnected(data.isConnected);
+              } else {
+                setIsConnected(true);
+              }
               
               // Reset disconnect timeout
               if (connectionTimeoutId) clearTimeout(connectionTimeoutId);

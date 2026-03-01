@@ -166,6 +166,7 @@ async function startServer() {
     humidity: 44,
     timestamp: new Date().toISOString()
   };
+  let lastUpdateTime = Date.now(); // Track when last data update occurred
 
   // --- Listen to Firebase Telemetry ---
   if (firebaseDb) {
@@ -186,6 +187,7 @@ async function startServer() {
                 humidity: Number(latest.humidity),
                 timestamp: new Date().toISOString()
               };
+              lastUpdateTime = Date.now(); // Mark data as fresh
               console.log(`[Firebase TELEMETRY] Temp: ${currentData.temp}, Humidity: ${currentData.humidity}`);
 
               // Broadcast to all WebSocket clients
@@ -233,6 +235,7 @@ async function startServer() {
         humidity: h,
         timestamp: new Date().toISOString()
       };
+      lastUpdateTime = Date.now(); // Mark data as fresh
 
       const hi = computeHeatIndex(t, h);
 
@@ -300,7 +303,12 @@ ThermaSense System Administrator`;
   });
 
   app.get("/api/telemetry/current", (req, res) => {
-    res.json(currentData);
+    // Check if data is fresh (received within last 10 seconds)
+    const isDataFresh = Date.now() - lastUpdateTime < 10000;
+    res.json({ 
+      ...currentData, 
+      isConnected: isDataFresh 
+    });
   });
 
   // Serve static files in production
