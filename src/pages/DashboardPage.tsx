@@ -17,9 +17,12 @@ export function DashboardPage() {
   const [currentTemp, setCurrentTemp] = useState(22.5);
   const [currentHumidity, setCurrentHumidity] = useState(44);
   const [isConnected, setIsConnected] = useState(false);
-  const [lastDataTime, setLastDataTime] = useState<number | null>(null);
 
   useEffect(() => {
+    // Track when last data arrived
+    let lastDataTime = Date.now();
+    let connectionTimeoutId: NodeJS.Timeout | null = null;
+
     // Fetch initial current data
     fetch(`${API_BASE}/api/telemetry/current`)
       .then(res => res.json())
@@ -27,8 +30,14 @@ export function DashboardPage() {
         if (initial && initial.temp && initial.humidity) {
           setCurrentTemp(initial.temp);
           setCurrentHumidity(initial.humidity);
-          setLastDataTime(Date.now());
+          lastDataTime = Date.now();
           setIsConnected(true);
+          // Clear any pending timeout
+          if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
+          // Set timeout to mark disconnected after 10 seconds of no data
+          connectionTimeoutId = setTimeout(() => {
+            setIsConnected(false);
+          }, 10000);
         }
       })
       .catch(err => console.error("Failed to fetch initial data", err));
@@ -55,8 +64,15 @@ export function DashboardPage() {
         const message = JSON.parse(event.data);
         if (message.type === "TELEMETRY") {
           lastWsMessage = Date.now();
-          setLastDataTime(Date.now());
+          lastDataTime = Date.now();
           setIsConnected(true);
+          
+          // Reset disconnect timeout
+          if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
+          connectionTimeoutId = setTimeout(() => {
+            setIsConnected(false);
+          }, 10000);
+
           const { temp, humidity, timestamp } = message.data;
           setCurrentTemp(temp);
           setCurrentHumidity(humidity);
@@ -82,14 +98,8 @@ export function DashboardPage() {
     ws.onclose = () => {
       console.log("WebSocket disconnected");
       setIsConnected(false);
+      if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
     };
-
-    // Poll for connection status: mark as disconnected if no data for 10 seconds
-    const statusCheckInterval = setInterval(() => {
-      if (lastDataTime && Date.now() - lastDataTime > 10000) {
-        setIsConnected(false);
-      }
-    }, 3000);
 
     // Polling fallback (in case WS is blocked by proxy)
     const pollInterval = setInterval(() => {
@@ -98,8 +108,16 @@ export function DashboardPage() {
           .then(res => res.json())
           .then(data => {
             if (data && data.temp && data.humidity) {
-              setLastDataTime(Date.now());
+              lastDataTime = Date.now();
+              lastWsMessage = Date.now();
               setIsConnected(true);
+              
+              // Reset disconnect timeout
+              if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
+              connectionTimeoutId = setTimeout(() => {
+                setIsConnected(false);
+              }, 10000);
+              
               setCurrentTemp(data.temp);
               setCurrentHumidity(data.humidity);
               
@@ -121,7 +139,7 @@ export function DashboardPage() {
     }, 5000);
 
     return () => {
-      clearInterval(statusCheckInterval);
+      if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
       clearInterval(pollInterval);
       ws.close();
     };
