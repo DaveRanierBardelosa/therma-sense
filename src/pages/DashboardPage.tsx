@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { Analytics } from "@/components/Analytics";
 import { useAuth } from "@/context/AuthContext";
 import { Thermometer, Droplets, AlertTriangle, Activity, Wifi, WifiOff, Bell } from "lucide-react";
 
@@ -279,6 +280,9 @@ export function DashboardPage() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Analytics */}
+      <Analytics />
     </DashboardLayout>
   );
 }

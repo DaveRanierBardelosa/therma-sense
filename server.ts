@@ -168,7 +168,27 @@ async function startServer() {
   };
   let lastUpdateTime = Date.now(); // Track when last data update occurred
 
-  // --- Listen to Firebase Telemetry ---
+  // Telemetry history for analytics (keep last 10,000 readings = ~2.7 hours at 1 reading/sec)
+  interface TelemetryPoint {
+    temp: number;
+    humidity: number;
+    timestamp: number; // milliseconds
+  }
+  let telemetryHistory: TelemetryPoint[] = [];
+  const MAX_HISTORY = 10000;
+
+  // Helper to add telemetry reading to history
+  const addToHistory = (temp: number, humidity: number) => {
+    telemetryHistory.push({
+      temp,
+      humidity,
+      timestamp: Date.now()
+    });
+    // Keep only last MAX_HISTORY readings
+    if (telemetryHistory.length > MAX_HISTORY) {
+      telemetryHistory = telemetryHistory.slice(-MAX_HISTORY);
+    }
+  };  // --- Listen to Firebase Telemetry ---
   if (firebaseDb) {
     try {
       const telemetryRef = ref(firebaseDb, 'telemetry');
@@ -188,6 +208,7 @@ async function startServer() {
                 timestamp: new Date().toISOString()
               };
               lastUpdateTime = Date.now(); // Mark data as fresh
+              addToHistory(Number(latest.temp), Number(latest.humidity)); // Track in history
               console.log(`[Firebase TELEMETRY] Temp: ${currentData.temp}, Humidity: ${currentData.humidity}`);
 
               // Broadcast to all WebSocket clients
@@ -236,6 +257,7 @@ async function startServer() {
         timestamp: new Date().toISOString()
       };
       lastUpdateTime = Date.now(); // Mark data as fresh
+      addToHistory(t, h); // Track in history
 
       const hi = computeHeatIndex(t, h);
 
@@ -310,6 +332,75 @@ ThermaSense System Administrator`;
       isConnected: isDataFresh 
     });
   });
+
+  app.get("/api/telemetry/analytics", (req, res) => {
+    const interval = (req.query.interval as string) || 'hour';
+    
+    if (telemetryHistory.length === 0) {
+      return res.json([]);
+    }
+
+    // Determine interval in milliseconds
+    let intervalMs = 60000; // default: 1 minute
+    if (interval === 'minute') intervalMs = 60000;
+    else if (interval === 'hour') intervalMs = 3600000;
+    else if (interval === 'day') intervalMs = 86400000;
+    else if (interval === 'week') intervalMs = 604800000;
+    else if (interval === 'month') intervalMs = 2592000000; // 30 days
+
+    // Group data by interval and calculate averages
+    const now = Date.now();
+    const groups: Record<number, { temps: number[], humidities: number[], timestamp: number }> = {};
+
+    telemetryHistory.forEach(point => {
+      const groupKey = Math.floor(point.timestamp / intervalMs);
+      if (!groups[groupKey]) {
+        groups[groupKey] = { temps: [], humidities: [], timestamp: groupKey * intervalMs };
+      }
+      groups[groupKey].temps.push(point.temp);
+      groups[groupKey].humidities.push(point.humidity);
+    });
+
+    // Calculate averages and heat index
+    const computeHI = (t: number, h: number) => {
+      if (isNaN(t) || isNaN(h)) return NaN;
+      const T = (t * 9.0 / 5.0) + 32.0;
+      const HI = -42.379 + 2.04901523 * T + 10.14333127 * h
+                 - 0.22475541 * T * h - 0.00683783 * T * T
+                 - 0.05481717 * h * h + 0.00122874 * T * T * h
+                 + 0.00085282 * T * h * h - 0.00000199 * T * T * h * h;
+      return (HI - 32.0) * 5.0 / 9.0;
+    };
+
+    const result = Object.values(groups)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(group => {
+        const avgTemp = group.temps.reduce((a, b) => a + b, 0) / group.temps.length;
+        const avgHumidity = group.humidities.reduce((a, b) => a + b, 0) / group.humidities.length;
+        const avgHI = computeHI(avgTemp, avgHumidity);
+        
+        const date = new Date(group.timestamp);
+        let label = '';
+        if (interval === 'minute') {
+          label = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+        } else if (interval === 'hour') {
+          label = `${date.getHours().toString().padStart(2, '0')}:00`;
+        } else {
+          label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        return {
+          time: label,
+          temp: Number(avgTemp.toFixed(1)),
+          humidity: Number(avgHumidity.toFixed(1)),
+          heatIndex: Number(avgHI.toFixed(1)),
+          timestamp: group.timestamp
+        };
+      });
+
+    res.json(result);
+  });
+
 
   // Serve static files in production
   if (process.env.NODE_ENV === "production") {
