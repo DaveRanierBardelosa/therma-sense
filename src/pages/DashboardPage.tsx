@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Thermometer, Droplets, AlertTriangle, Activity, Wifi, WifiOff } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { Thermometer, Droplets, AlertTriangle, Activity, Wifi, WifiOff, Bell } from "lucide-react";
 
 const initialData = [
   { time: "10:00", temp: 22.4, humidity: 45 },
@@ -16,6 +17,7 @@ export function DashboardPage() {
   const [currentTemp, setCurrentTemp] = useState(22.5);
   const [currentHumidity, setCurrentHumidity] = useState(44);
   const [isConnected, setIsConnected] = useState(false);
+  const [lastDataTime, setLastDataTime] = useState<number | null>(null);
 
   useEffect(() => {
     // Fetch initial current data
@@ -25,6 +27,8 @@ export function DashboardPage() {
         if (initial && initial.temp && initial.humidity) {
           setCurrentTemp(initial.temp);
           setCurrentHumidity(initial.humidity);
+          setLastDataTime(Date.now());
+          setIsConnected(true);
         }
       })
       .catch(err => console.error("Failed to fetch initial data", err));
@@ -43,7 +47,7 @@ export function DashboardPage() {
     let lastWsMessage = Date.now();
 
     ws.onopen = () => {
-      setIsConnected(true);
+      console.log("WebSocket connected");
     };
 
     ws.onmessage = (event) => {
@@ -51,6 +55,8 @@ export function DashboardPage() {
         const message = JSON.parse(event.data);
         if (message.type === "TELEMETRY") {
           lastWsMessage = Date.now();
+          setLastDataTime(Date.now());
+          setIsConnected(true);
           const { temp, humidity, timestamp } = message.data;
           setCurrentTemp(temp);
           setCurrentHumidity(humidity);
@@ -74,8 +80,16 @@ export function DashboardPage() {
     };
 
     ws.onclose = () => {
+      console.log("WebSocket disconnected");
       setIsConnected(false);
     };
+
+    // Poll for connection status: mark as disconnected if no data for 10 seconds
+    const statusCheckInterval = setInterval(() => {
+      if (lastDataTime && Date.now() - lastDataTime > 10000) {
+        setIsConnected(false);
+      }
+    }, 3000);
 
     // Polling fallback (in case WS is blocked by proxy)
     const pollInterval = setInterval(() => {
@@ -84,6 +98,7 @@ export function DashboardPage() {
           .then(res => res.json())
           .then(data => {
             if (data && data.temp && data.humidity) {
+              setLastDataTime(Date.now());
               setIsConnected(true);
               setCurrentTemp(data.temp);
               setCurrentHumidity(data.humidity);
@@ -101,11 +116,12 @@ export function DashboardPage() {
               });
             }
           })
-          .catch(() => setIsConnected(false));
+          .catch(() => console.error("Poll failed"));
       }
     }, 5000);
 
     return () => {
+      clearInterval(statusCheckInterval);
       clearInterval(pollInterval);
       ws.close();
     };

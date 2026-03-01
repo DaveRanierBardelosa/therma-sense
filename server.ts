@@ -72,9 +72,13 @@ async function startServer() {
   const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "bardelosaranierdave@gmail.com"; // Only this email can be admin
 
   // Helper to verify user is admin
+  // since the file storage is ephemeral on Railway, we don't
+  // want to rely on reading the users array to grant admin rights.
+  // instead only the configured ADMIN_EMAIL is allowed to perform
+  // privileged actions. this also avoids the "approve button not
+  // working because user list reset" problem.
   const isAdmin = (email: string | undefined) => {
-    const user = users.find(u => u.email === email);
-    return user && user.role === "Admin";
+    return email === ADMIN_EMAIL;
   };
 
   // --- Auth Endpoints ---
@@ -125,6 +129,7 @@ async function startServer() {
   app.post("/api/users/:id/approve", (req, res) => {
     // Check if the requesting user is an admin
     const adminEmail = req.body.adminEmail;
+    console.log("approve request from", adminEmail, "target id", req.params.id);
     if (!isAdmin(adminEmail)) {
       return res.status(403).json({ success: false, message: "Only admins can approve users." });
     }
@@ -243,27 +248,48 @@ async function startServer() {
       if (hi >= 40.0 && Date.now() - lastAlertTime > ALERT_COOLDOWN) {
         lastAlertTime = Date.now();
         
-        // Get all approved Authorities and Admins
-        const recipients = db.prepare("SELECT email FROM users WHERE status = 'approved'").all() as {email: string}[];
-        const emails = recipients.map(r => r.email).join(",");
+        // Get all approved authorities
+        const approvedAuthorities = users.filter(u => u.status === 'approved');
+        const authorityEmails = approvedAuthorities.map(u => u.email);
 
-        if (emails && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-          const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: emails,
-            subject: "🚨 THERMASENSE ALERT: EXTREME DANGER",
-            text: `DANGER! Heat Index has reached ${hi.toFixed(1)}°C.\nTemperature: ${t.toFixed(1)}°C\nHumidity: ${h.toFixed(1)}%\n\nPlease check the dashboard immediately.`,
-          };
+        if (authorityEmails.length > 0 && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+          authorityEmails.forEach((authorityEmail) => {
+            const authorityName = approvedAuthorities.find(u => u.email === authorityEmail)?.name || 'Authority';
+            const alertTime = new Date().toLocaleString();
+            const emailBody = `Dear ${authorityName},
 
-          transporter.sendMail(mailOptions, (error, info) => {
-            if (error) {
-              console.error("Error sending alert email:", error);
-            } else {
-              console.log("Alert email sent:", info.response);
-            }
+This is a formal notification that our real-time monitoring system has detected extreme temperature levels at ZONE A-1.
+
+As of ${alertTime}, the recorded temperature has exceeded safety thresholds:
+  • Temperature: ${t.toFixed(1)}°C
+  • Humidity: ${h.toFixed(1)}%
+  • Heat Index: ${hi.toFixed(1)}°C
+
+This poses an immediate risk to students and personnel. We recommend an urgent inspection and the implementation of cooling protocols to mitigate potential damage or safety hazards.
+
+Detailed telemetry data is available via the project dashboard at https://therma-sense-production.up.railway.app/dashboard for your review.
+
+Sincerely,
+RANIER DAVE B. BARDELOSA
+ThermaSense System Administrator`;
+
+            const mailOptions = {
+              from: process.env.EMAIL_USER,
+              to: authorityEmail,
+              subject: "🚨 THERMASENSE ALERT: EXTREME DANGER - ZONE A-1",
+              text: emailBody,
+            };
+
+            transporter.sendMail(mailOptions, (error, info) => {
+              if (error) {
+                console.error(`Error sending alert email to ${authorityEmail}:`, error);
+              } else {
+                console.log(`Alert email sent to ${authorityEmail}:`, info.response);
+              }
+            });
           });
         } else {
-          console.log("DANGER reached, but EMAIL_USER/EMAIL_PASS not configured or no approved users.");
+          console.log("DANGER reached, but EMAIL_USER/EMAIL_PASS not configured or no approved authorities.");
         }
       }
 
